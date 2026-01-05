@@ -43,8 +43,40 @@ def analyze_chart(req: ChartRequest):
     )
     
     # 2. 準備給 AI 的提示詞 (Prompt)
-    # 這裡把星盤數據轉成文字，餵給 AI
-    chart_summary = f"太陽在{chart_data['sun']['sign']}, 月亮在{chart_data['moon']['sign']}, 金星在{chart_data['venus']['sign']}, 火星在{chart_data['mars']['sign']}。"
+    # 提取西方占星數據
+    western_data = chart_data.get('western', chart_data)  # 如果沒有嵌套結構，直接使用 chart_data
+    
+    # 安全地提取行星數據
+    try:
+        chart_summary = f"太陽在{western_data['sun']['sign']}, 月亮在{western_data['moon']['sign']}, 金星在{western_data['venus']['sign']}, 火星在{western_data['mars']['sign']}。"
+    except (KeyError, TypeError):
+        # 如果結構不同，嘗試其他方式
+        chart_summary = "星盤數據已計算完成。"
+    
+    # 提取八字數據
+    chinese_data = chart_data.get('chinese', {})
+    self_element = chinese_data.get('self_element', '')
+    five_elements = chinese_data.get('five_elements', {})
+    
+    # 格式化五行分佈文字
+    elements_count = []
+    element_names_cn = {
+        'Metal': '金',
+        'Wood': '木',
+        'Water': '水',
+        'Fire': '火',
+        'Earth': '土'
+    }
+    for eng_name, cn_name in element_names_cn.items():
+        count = five_elements.get(eng_name, 0)
+        if count > 0:
+            elements_count.append(f"{cn_name}{count}")
+    elements_count_str = "、".join(elements_count) if elements_count else "無"
+    
+    # 構建包含八字的提示詞
+    bazi_info = ""
+    if self_element:
+        bazi_info = f"用戶的八字日主為：{self_element} (即五行屬性)，五行分佈為：{elements_count_str}。"
     
     system_prompt = """
     你是一位資深的心理占星專家。請根據用戶的星盤數據，用溫暖、療癒、一針見血的語氣（繁體中文）撰寫分析報告。
@@ -52,11 +84,14 @@ def analyze_chart(req: ChartRequest):
     {
       "attachment_style": "焦慮型/迴避型/安全型 (請根據星盤判斷)",
       "attachment_desc": "關於依戀類型的簡短分析 (約200字)",
-      "deep_analysis": "深度分析文章，包含性格盲點、情感模式、事業潛力、靈魂使命 (約1000字)"
+      "deep_analysis": "深度分析文章，包含性格盲點、情感模式、事業潛力、靈魂使命 (約1000字)。請在「深度探索」部分自然地融入中國五行元素的分析，例如：「你是火日主，但命盤中缺水，這暗示...」"
     }
     """
     
-    user_prompt = f"用戶的星盤數據如下：{chart_summary}。請進行分析。"
+    user_prompt = f"用戶的星盤數據如下：{chart_summary}"
+    if bazi_info:
+        user_prompt += f" {bazi_info}"
+    user_prompt += "請進行分析。"
 
     try:
         # 3. 呼叫 DeepSeek
@@ -74,8 +109,16 @@ def analyze_chart(req: ChartRequest):
         ai_content = response.choices[0].message.content
         
         # 5. 回傳結果 (包含星盤數據 + AI文章)
+        # 確保返回結構符合前端需求
         return {
-            "chart": chart_data,
+            "chart": {
+                "western": western_data,
+                "chinese": {
+                    "self_element": self_element,
+                    "bazi_chars": chinese_data.get('bazi_chars', []),
+                    "five_elements": five_elements
+                }
+            },
             "ai_report": ai_content # 這裡是字串，前端需要再解析一次 JSON
         }
 
@@ -83,7 +126,14 @@ def analyze_chart(req: ChartRequest):
         print(f"DeepSeek Error: {e}")
         # 如果 AI 失敗，至少回傳星盤數據，不要報錯
         return {
-            "chart": chart_data,
+            "chart": {
+                "western": western_data,
+                "chinese": {
+                    "self_element": self_element,
+                    "bazi_chars": chinese_data.get('bazi_chars', []),
+                    "five_elements": five_elements
+                }
+            },
             "ai_report": None,
             "error": str(e)
         }

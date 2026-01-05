@@ -1,54 +1,28 @@
-from skyfield.api import load, Topos
-from skyfield.framelib import ecliptic_frame
+I need to add Traditional Chinese BaZi (Eight Characters) calculation to `engine.py`.
 
-def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2, is_time_unknown=False):
-    # 1. Load Data
-    ts = load.timescale()
-    t = ts.utc(year, month, day, hour - 8, minute) # Simple UTC conversion (assuming input is UTC+8 for HK/TW)
-    eph = load('de421.bsp')
-    
-    # 2. Define Earth and Location
-    earth = eph['earth']
-    location = earth + Topos(latitude_degrees=lat, longitude_degrees=lon)
-    
-    # 3. Define Planets (CRITICAL FIX HERE)
-    # Outer planets must use 'barycenter' in de421.bsp
-    planet_map = {
-        'Sun': eph['sun'],
-        'Moon': eph['moon'],
-        'Mercury': eph['mercury'],
-        'Venus': eph['venus'],
-        'Mars': eph['mars'],
-        'Jupiter': eph['jupiter barycenter'],  # Fixed
-        'Saturn': eph['saturn barycenter'],    # Fixed
-        'Uranus': eph['uranus barycenter'],    # Fixed
-        'Neptune': eph['neptune barycenter'],  # Fixed
-        'Pluto': eph['pluto barycenter']       # Fixed
-    }
+Please import `from lunar_python import Solar` and rewrite `engine.py`.
 
-    results = {}
-    
-    # 4. Calculate Positions
-    for name, body in planet_map.items():
-        astrometric = location.at(t).observe(body)
-        _, lon_deg, _ = astrometric.frame_latlon(ecliptic_frame)
-        
-        # Convert 0-360 to Zodiac Sign
-        lon_deg = lon_deg.degrees % 360
-        sign_index = int(lon_deg / 30)
-        zodiac_signs = [
-            "Aries", "Taurus", "Gemini", "Cancer", 
-            "Leo", "Virgo", "Libra", "Scorpio", 
-            "Sagittarius", "Capricorn", "Aquarius", "Pisces"
-        ]
-        degree_in_sign = lon_deg % 30
-        
-        # Calculate House (Simplified logic - usually requires House System lib)
-        # For now, we return the sign and exact degree
-        results[name.lower()] = {
-            "sign": zodiac_signs[sign_index],
-            "deg": round(degree_in_sign, 2),
-            "abs_deg": round(lon_deg, 2)
-        }
+### New Features in `calculate_positions`:
+1.  **Keep Existing Logic:** Skyfield planets, Western Elements (Fire/Air...), Houses.
+2.  **Add BaZi Logic:**
+    - Convert input date to Solar object: `solar = Solar.fromYmdHms(year, month, day, hour, minute, 0)`
+    - Get Lunar object: `lunar = solar.getLunar()`
+    - Get the 8 Characters (BaZi): Year/Month/Day/Time Ganzhi.
+    - **Determine "Day Master" (日主):** This is the Heavenly Stem of the Day. Map it to an Element (e.g., Jia/Yi = Wood). This represents the user's "Self Element".
+3.  **Calculate Chinese 5 Elements Ratio:**
+    - Map all 8 characters (4 Stems, 4 Branches) to their Elements (Metal, Wood, Water, Fire, Earth).
+    - Count them.
+    - Return a dictionary: `{"Metal": 1, "Wood": 3, "Water": 2, "Fire": 1, "Earth": 1}`.
+4.  **Formatting:**
+    - Return specific fields: `self_element` (e.g., "火"), `bazi_text` (e.g., "癸亥年..."), and the counts.
 
-    return results
+### Mapping Reference (for your code):
+- **Stems:** Jia/Yi=Wood, Bing/Ding=Fire, Wu/Ji=Earth, Geng/Xin=Metal, Ren/Gui=Water.
+- **Branches:**
+  - Water: Zi, Hai
+  - Earth: Chou, Chen, Wei, Xu
+  - Wood: Yin, Mao
+  - Fire: Si, Wu
+  - Metal: Shen, You
+
+Please write the complete `engine.py` merging Western and Chinese logic.
