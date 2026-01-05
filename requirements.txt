@@ -5,3 +5,4 @@ pytz
 numpy<2.0
 gunicorn
 openai
+pydantic

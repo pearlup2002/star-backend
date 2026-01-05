@@ -1,177 +1,89 @@
-"""
-FastAPI server for Star Mirror Astrology Backend.
-"""
-import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+import os
+import engine
 from openai import OpenAI
-from engine import calculate_positions
 
-app = FastAPI(title="Star Mirror Backend API")
+app = FastAPI()
 
+# 設定 DeepSeek 客戶端 (從 Render 環境變數讀取鑰匙)
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com"
+)
 
-class CalculationRequest(BaseModel):
+# 定義請求格式
+class ChartRequest(BaseModel):
     year: int
     month: int
     day: int
-    hour: Optional[int] = None
-    minute: Optional[int] = None
-    lat: float
-    lon: float
-
+    hour: int = 12
+    minute: int = 0
+    lat: float = 22.3
+    lon: float = 114.2
+    is_time_unknown: bool = False
 
 @app.get("/")
-async def root():
-    """Root endpoint to check if the server is running."""
-    return {"status": "Star Mirror Backend is running"}
+def read_root():
+    return {"status": "Star Mirror Backend is running with DeepSeek AI"}
 
-
+# 舊的純計算接口 (保留備用)
 @app.post("/calculate")
-async def calculate(request: CalculationRequest):
-    """
-    Calculate planetary positions and house cusps.
-    
-    Request body should contain:
-    - year: int
-    - month: int
-    - day: int
-    - hour: int (optional, defaults to 12:00 PM if not provided)
-    - minute: int (optional, defaults to 0)
-    - lat: float (latitude)
-    - lon: float (longitude)
-    """
-    try:
-        result = calculate_positions(
-            year=request.year,
-            month=request.month,
-            day=request.day,
-            hour=request.hour,
-            minute=request.minute,
-            lat=request.lat,
-            lon=request.lon
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Calculation error: {str(e)}")
+def calculate_chart(req: ChartRequest):
+    return engine.calculate_positions(
+        req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown
+    )
 
-
+# --- 新增：深度分析接口 (AI 寫作文) ---
 @app.post("/analyze")
-async def analyze(request: CalculationRequest):
-    """
-    Calculate planetary positions and generate a 1000-word deep analysis using DeepSeek AI.
+def analyze_chart(req: ChartRequest):
+    # 1. 先算出星盤數據
+    chart_data = engine.calculate_positions(
+        req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown
+    )
     
-    Request body should contain:
-    - year: int
-    - month: int
-    - day: int
-    - hour: int (optional, defaults to 12:00 PM if not provided)
-    - minute: int (optional, defaults to 0)
-    - lat: float (latitude)
-    - lon: float (longitude)
+    # 2. 準備給 AI 的提示詞 (Prompt)
+    # 這裡把星盤數據轉成文字，餵給 AI
+    chart_summary = f"太陽在{chart_data['sun']['sign']}, 月亮在{chart_data['moon']['sign']}, 金星在{chart_data['venus']['sign']}, 火星在{chart_data['mars']['sign']}。"
+    
+    system_prompt = """
+    你是一位資深的心理占星專家。請根據用戶的星盤數據，用溫暖、療癒、一針見血的語氣（繁體中文）撰寫分析報告。
+    請嚴格按照以下 JSON 格式回傳，不要包含 markdown 標記：
+    {
+      "attachment_style": "焦慮型/迴避型/安全型 (請根據星盤判斷)",
+      "attachment_desc": "關於依戀類型的簡短分析 (約200字)",
+      "deep_analysis": "深度分析文章，包含性格盲點、情感模式、事業潛力、靈魂使命 (約1000字)"
+    }
     """
+    
+    user_prompt = f"用戶的星盤數據如下：{chart_summary}。請進行分析。"
+
     try:
-        # 1. Calculate the star chart
-        chart_data = calculate_positions(
-            year=request.year,
-            month=request.month,
-            day=request.day,
-            hour=request.hour,
-            minute=request.minute,
-            lat=request.lat,
-            lon=request.lon
-        )
-        
-        # 2. Construct the prompt
-        # Map planet names to Chinese
-        planet_names_cn = {
-            'sun': '太陽',
-            'moon': '月亮',
-            'mercury': '水星',
-            'venus': '金星',
-            'mars': '火星',
-            'jupiter': '木星',
-            'saturn': '土星',
-            'uranus': '天王星',
-            'neptune': '海王星',
-            'pluto': '冥王星'
-        }
-        
-        # Map zodiac signs to Chinese
-        zodiac_signs_cn = {
-            'Aries': '白羊座',
-            'Taurus': '金牛座',
-            'Gemini': '雙子座',
-            'Cancer': '巨蟹座',
-            'Leo': '獅子座',
-            'Virgo': '處女座',
-            'Libra': '天秤座',
-            'Scorpio': '天蠍座',
-            'Sagittarius': '射手座',
-            'Capricorn': '摩羯座',
-            'Aquarius': '水瓶座',
-            'Pisces': '雙魚座'
-        }
-        
-        # Build chart data string
-        chart_parts = []
-        for planet_key, planet_cn in planet_names_cn.items():
-            if planet_key in chart_data:
-                planet_data = chart_data[planet_key]
-                sign_en = planet_data.get('sign', '')
-                sign_cn = zodiac_signs_cn.get(sign_en, sign_en)
-                deg = planet_data.get('deg', 0)
-                chart_parts.append(f"{planet_cn}={sign_cn} {deg}度")
-        
-        chart_string = "，".join(chart_parts)
-        
-        # Construct the full prompt
-        prompt_content = f"用戶的星盤數據如下：{chart_string}。請為他撰寫一份 1000 字的深度分析報告。包含：性格盲點、情感模式、事業潛力、靈魂使命。"
-        
-        # 3. Call DeepSeek API
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=500, 
-                detail="DEEPSEEK_API_KEY environment variable is not set"
-            )
-        
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com"
-        )
-        
+        # 3. 呼叫 DeepSeek
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {
-                    "role": "system",
-                    "content": "你是一位精通心理占星術的大師，擅長用溫暖、療癒且一針見血的語氣分析星盤。"
-                },
-                {
-                    "role": "user",
-                    "content": prompt_content
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
-            temperature=0.7,
-            max_tokens=2000
+            response_format={ "type": "json_object" }, # 強制回傳 JSON
+            temperature=1.0
         )
         
-        analysis_text = response.choices[0].message.content
+        # 4. 取得 AI 寫的內容
+        ai_content = response.choices[0].message.content
         
-        # 4. Return chart data and analysis
+        # 5. 回傳結果 (包含星盤數據 + AI文章)
         return {
             "chart": chart_data,
-            "analysis": analysis_text
+            "ai_report": ai_content # 這裡是字串，前端需要再解析一次 JSON
         }
-        
-    except HTTPException:
-        raise
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
+        print(f"DeepSeek Error: {e}")
+        # 如果 AI 失敗，至少回傳星盤數據，不要報錯
+        return {
+            "chart": chart_data,
+            "ai_report": None,
+            "error": str(e)
+        }
