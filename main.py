@@ -3,16 +3,15 @@ from pydantic import BaseModel
 import os
 import engine
 from openai import OpenAI
+import json
 
 app = FastAPI()
 
-# 設定 DeepSeek 客戶端 (從 Render 環境變數讀取鑰匙)
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com"
 )
 
-# 定義請求格式
 class ChartRequest(BaseModel):
     year: int
     month: int
@@ -25,115 +24,75 @@ class ChartRequest(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "Star Mirror Backend is running with DeepSeek AI"}
+    return {"status": "Star Mirror Backend v2 is Running"}
 
-# 舊的純計算接口 (保留備用)
-@app.post("/calculate")
-def calculate_chart(req: ChartRequest):
-    return engine.calculate_positions(
-        req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown
-    )
-
-# --- 新增：深度分析接口 (AI 寫作文) ---
 @app.post("/analyze")
 def analyze_chart(req: ChartRequest):
-    # 1. 先算出星盤數據
-    chart_data = engine.calculate_positions(
-        req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown
-    )
-    
-    # 2. 準備給 AI 的提示詞 (Prompt)
-    # 提取西方占星數據
-    western_data = chart_data.get('western', chart_data)  # 如果沒有嵌套結構，直接使用 chart_data
-    
-    # 安全地提取行星數據
+    # 1. 算出星盤 (含八字五行)
     try:
-        chart_summary = f"太陽在{western_data['sun']['sign']}, 月亮在{western_data['moon']['sign']}, 金星在{western_data['venus']['sign']}, 火星在{western_data['mars']['sign']}。"
-    except (KeyError, TypeError):
-        # 如果結構不同，嘗試其他方式
-        chart_summary = "星盤數據已計算完成。"
+        chart_data = engine.calculate_positions(
+            req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown
+        )
+    except Exception as e:
+        return {"error": f"Calculation Error: {str(e)}"}
     
-    # 提取八字數據
-    chinese_data = chart_data.get('chinese', {})
-    self_element = chinese_data.get('self_element', '')
-    five_elements = chinese_data.get('five_elements', {})
+    # 2. 準備 AI 提示詞
+    # 判斷是否降級
+    time_info = "出生時間已知"
+    if req.is_time_unknown:
+        time_info = "出生時間未知（請忽略宮位、上升星座與月亮具體度數的分析，重點放在行星落座與相位）"
+
+    # 把數據轉成文字餵給 AI
+    western = chart_data['western']['planets']
+    chinese = chart_data['chinese']
     
-    # 格式化五行分佈文字
-    elements_count = []
-    element_names_cn = {
-        'Metal': '金',
-        'Wood': '木',
-        'Water': '水',
-        'Fire': '火',
-        'Earth': '土'
-    }
-    for eng_name, cn_name in element_names_cn.items():
-        count = five_elements.get(eng_name, 0)
-        if count > 0:
-            elements_count.append(f"{cn_name}{count}")
-    elements_count_str = "、".join(elements_count) if elements_count else "無"
-    
-    # 構建包含八字的提示詞
-    bazi_info = ""
-    if self_element:
-        bazi_info = f"用戶的八字日主為：{self_element} (即五行屬性)，五行分佈為：{elements_count_str}。"
-    
-    system_prompt = """
-    你是一位資深的心理占星專家。請根據用戶的星盤數據，用溫暖、療癒、一針見血的語氣（繁體中文）撰寫分析報告。
-    請嚴格按照以下 JSON 格式回傳，不要包含 markdown 標記：
-    {
-      "attachment_style": "焦慮型/迴避型/安全型 (請根據星盤判斷)",
-      "attachment_desc": "關於依戀類型的簡短分析 (約200字)",
-      "deep_analysis": "深度分析文章，包含性格盲點、情感模式、事業潛力、靈魂使命 (約1000字)。請在「深度探索」部分自然地融入中國五行元素的分析，例如：「你是火日主，但命盤中缺水，這暗示...」"
-    }
+    chart_summary = f"""
+    【基本資料】{time_info}
+    【西方星盤】
+    太陽: {western['sun']['sign']}
+    月亮: {western['moon']['sign']}
+    水星: {western['mercury']['sign']}
+    金星: {western['venus']['sign']}
+    火星: {western['mars']['sign']}
+    上升: {chart_data['western']['rising']}
+    【中式八字】
+    日主(命主屬性): {chinese['self_element']}
+    五行分佈: {json.dumps(chinese['five_elements'], ensure_ascii=False)}
     """
     
-    user_prompt = f"用戶的星盤數據如下：{chart_summary}"
-    if bazi_info:
-        user_prompt += f" {bazi_info}"
-    user_prompt += "請進行分析。"
+    system_prompt = """
+    你是一位資深的心理占星與命理大師。請根據用戶數據，輸出繁體中文 JSON 格式報告。
+    語氣要求：溫暖、療癒、專業。
+    
+    必須回傳嚴格的 JSON 格式，不要 Markdown：
+    {
+      "attachment_style": "焦慮型/迴避型/安全型/恐懼型",
+      "attachment_desc": "依戀類型傾向分析（約250字）。結尾必須加上：『（註：此結果依據星盤分析，不構成心理咨詢和專業意見）』",
+      "deep_exploration": "星盤深度探索（約1000字）。每次請隨機選擇一個切入點（如：潛意識陰影、靈魂藍圖、原生家庭業力、事業天賦）進行深入解讀，確保每次生成內容不同。若時間未知，請勿分析宮位。"
+    }
+    """
 
     try:
-        # 3. 呼叫 DeepSeek
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": f"用戶數據：{chart_summary}"},
             ],
-            response_format={ "type": "json_object" }, # 強制回傳 JSON
-            temperature=1.0
+            response_format={ "type": "json_object" },
+            temperature=1.2 # 提高隨機性，讓每次深度探索都不同
         )
-        
-        # 4. 取得 AI 寫的內容
         ai_content = response.choices[0].message.content
         
-        # 5. 回傳結果 (包含星盤數據 + AI文章)
-        # 確保返回結構符合前端需求
         return {
-            "chart": {
-                "western": western_data,
-                "chinese": {
-                    "self_element": self_element,
-                    "bazi_chars": chinese_data.get('bazi_chars', []),
-                    "five_elements": five_elements
-                }
-            },
-            "ai_report": ai_content # 這裡是字串，前端需要再解析一次 JSON
+            "chart": chart_data,
+            "ai_report": ai_content
         }
 
     except Exception as e:
         print(f"DeepSeek Error: {e}")
-        # 如果 AI 失敗，至少回傳星盤數據，不要報錯
         return {
-            "chart": {
-                "western": western_data,
-                "chinese": {
-                    "self_element": self_element,
-                    "bazi_chars": chinese_data.get('bazi_chars', []),
-                    "five_elements": five_elements
-                }
-            },
+            "chart": chart_data,
             "ai_report": None,
             "error": str(e)
         }
