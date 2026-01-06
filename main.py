@@ -3,87 +3,48 @@ from pydantic import BaseModel
 import os
 import engine
 from openai import OpenAI
-import json
 import random
 
 app = FastAPI()
-
-client = OpenAI(
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url="https://api.deepseek.com"
-)
+client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 
 class ChartRequest(BaseModel):
-    year: int
-    month: int
-    day: int
-    hour: int = 12
-    minute: int = 0
-    lat: float = 22.3
-    lon: float = 114.2
-    is_time_unknown: bool = False
+    year: int; month: int; day: int; hour: int = 12; minute: int = 0; lat: float = 22.3; lon: float = 114.2; is_time_unknown: bool = False
 
 @app.post("/analyze")
 def analyze_chart(req: ChartRequest):
-    try:
-        chart_data = engine.calculate_positions(
-            req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown
-        )
-    except Exception as e:
-        return {"error": str(e)}
+    chart = engine.calculate_positions(req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown)
     
-    # 隨機主題
-    topics = [
-        "【潛意識與安全感】、 \n\n【職場致勝關鍵】、 \n\n【情感致命傷】",
-        "【靈魂的天賦】、 \n\n【人際關係盲點】、 \n\n【財富能量流動】",
-        "【外在面具與真實自我】、 \n\n【愛情中的控制與臣服】、 \n\n【事業突破口】"
-    ]
-    selected_topic = random.choice(topics)
+    w = chart['western']['planets']
+    summary = f"太陽{w['sun']['sign']}, 月亮{w['moon']['sign']}, 上升{chart['western']['rising']}, 金星{w['venus']['sign']}, 火星{w['mars']['sign']}。日主{chart['chinese']['self_element']}。"
 
-    western = chart_data['western']['planets']
+    # 隨機切入點 (保持新鮮感)
+    themes = ["【靈魂藍圖與潛能】", "【金錢觀與事業運】", "【情感糾葛與正緣】", "【潛意識陰影與轉化】"]
+    random.shuffle(themes)
     
-    # 構建更專業的數據描述
-    chart_summary = f"""
-    【星盤數據】
-    太陽:{western['sun']['sign']}, 月亮:{western['moon']['sign']}, 上升:{chart_data['western']['rising']}
-    水星:{western['mercury']['sign']}, 金星:{western['venus']['sign']}, 火星:{western['mars']['sign']}
-    """
+    sys_prompt = f"""
+    你是一位極具洞察力的心理占星大師。請分析用戶星盤並回傳 JSON。
     
-    # 如果有宮位數據，加入 AI 分析參考
-    if 'houses' in chart_data['western'] and chart_data['western']['houses']:
-        h = chart_data['western']['houses']
-        # 挑選重點宮位給 AI (例如 1, 5, 7, 10宮)
-        chart_summary += f"\n命宮:{h[0]['sign']}, 戀愛宮:{h[4]['sign']}, 夫妻宮:{h[6]['sign']}, 事業宮:{h[9]['sign']}"
-
-    system_prompt = f"""
-    你是一位說話直白、不打官腔的現代占星師。
+    【深度探索寫作要求】
+    1. 必須包含這四個章節：{themes[0]}、{themes[1]}、{themes[2]}、【綜合建議】。
+    2. 每個章節至少 200 字，總字數必須接近 1000 字。
+    3. 語氣：深刻、一針見血、不用客套話。
+    4. 內容：結合宮位與相位進行具體分析，不要只講空泛的星座特質。
     
-    【任務 1：依戀類型】
-    根據星盤判斷「焦慮型、迴避型、安全型、恐懼型」並分析 (約250字)。
-    
-    【任務 2：深度探索】
-    請針對：{selected_topic} 進行深度解析。字數約 800-1000 字。
-    
-    【風格要求】
-    1. ❌ 嚴禁廢話（如親愛的朋友）。
-    2. ✅ 標題用【】。
-    3. ✅ 內容必須具體，結合行星落座與宮位。
-    
-    回傳 JSON:
+    【回傳格式】
     {{
       "attachment_style": "...",
       "attachment_desc": "...",
       "deep_exploration": "..."
     }}
     """
-
+    
     try:
-        response = client.chat.completions.create(
+        res = client.chat.completions.create(
             model="deepseek-chat",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": chart_summary}],
-            response_format={ "type": "json_object" },
-            temperature=1.0
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": summary}],
+            response_format={"type": "json_object"}, temperature=1.1
         )
-        return {"chart": chart_data, "ai_report": response.choices[0].message.content}
+        return {"chart": chart, "ai_report": res.choices[0].message.content}
     except Exception as e:
-        return {"chart": chart_data, "ai_report": None, "error": str(e)}
+        return {"chart": chart, "ai_report": None, "error": str(e)}
