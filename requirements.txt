@@ -1,6 +1,7 @@
 fastapi
 uvicorn
-skyfield
+flatlib
+pyswisseph
 pytz
 numpy<2.0
 gunicorn
