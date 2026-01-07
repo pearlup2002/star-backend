@@ -113,12 +113,22 @@ def analyze_chart(req: ChartRequest):
 
     # --- C. 準備 AI 閱讀的資料 ---
     w = chart['western']['planets']
+    
+    # 準備宮位數據（用於宮位分析）
+    houses_info = ""
+    if chart.get('western', {}).get('houses'):
+        houses_list = []
+        for h in chart['western']['houses']:
+            houses_list.append(f"第{h['house']}宮 {h['sign']}")
+        houses_info = f"\n宮位配置：{', '.join(houses_list)}。"
+    
     summary = (
         f"用戶星盤資料：\n"
         f"太陽{w['sun']['sign']}, 月亮{w['moon']['sign']}, 上升{chart['western']['rising']}。\n"
         f"金星{w['venus']['sign']}, 火星{w['mars']['sign']}, 土星{w['saturn']['sign']}。\n"
         f"八字：{bazi_text}。\n"
         f"五行能量：{chart['chinese'].get('five_elements', 'N/A')}。"
+        f"{houses_info}"
     )
 
     # --- D. 定義 AI 提示詞 ---
@@ -214,6 +224,59 @@ def analyze_chart(req: ChartRequest):
     直接輸出分析內容，開頭不要有標題，直接從第一個小標題開始。小標題使用【標題】格式。
     """
     
+    # 3. 宮位分析提示詞（每一宮約100字，直接描述用戶特質）
+    houses_analysis_prompt = """
+    你是現代星盤解說師，風格：語言淺白，一針見血，不要廢話，不需要建議。
+
+    【任務】
+    根據用戶的12個宮位配置，分析用戶在每個宮位的性格特質。每一宮約100字左右。
+
+    【格式要求】
+    1. 使用【標題】格式標記每個宮位（例如：【第1宮】），這樣前端可以識別並顯示為黃色
+    2. 每個小標題必須獨立一行
+    3. 小標題後空一行再寫內容
+    4. 不要使用其他 Markdown 符號
+
+    【內容要求 - 極重要，嚴格執行】
+    1. **禁止建議**：絕對不要寫「建議你...」、「你可以試著...」、「你應該...」
+    
+    2. **禁止解釋宮位含義（極重要，絕對禁止）**：
+       - 絕對不要說「第X宮代表...」、「XX宮是...」、「XX宮意味著...」
+       - 絕對不要說「落入XX座意味著...」、「XX座在XX宮代表...」
+       - 絕對不要解釋「什麼是第X宮」、「第X宮的意義是...」
+       - 絕對不要說「第X宮掌管...」、「第X宮主管...」
+       - 直接說用戶在這個宮位的實際特質和表現
+    
+    3. **必須直接描述用戶特質（極重要）**：
+       - 直接說「你在這個領域...」、「你在這方面...」、「你總是...」、「你會...」
+       - 描述用戶的實際表現、行為模式、性格特質
+       - 每一宮約100字左右
+       - 範例：
+         (X) 錯誤：「第12宮 天秤座。第12宮代表隱藏的情感、潛意識。落入天秤座意味著你...」
+         (X) 錯誤：「第12宮掌管隱藏的情感，天秤座在這裡代表...」
+         (O) 正確：「【第12宮】\n\n你在隱藏的情感上：你習慣...，你會...，你總是...。你對過去的處理方式是...。」
+    
+    4. **語言風格（極重要）**：
+       - 淺白：用簡單直白的語言
+       - 一針見血：直接說重點，不要繞彎子
+       - 不要廢話：不要說「一般來說」、「通常」、「可能」
+       - 像在描述一個真實的人：用「你...」、「你會...」、「你總是...」這種直接描述
+       - 不要用「這代表...」、「這意味著...」、「這象徵...」這種解釋性語言
+
+    【輸出格式】
+    直接輸出分析內容，每個宮位一個【標題】，格式如下：
+
+    【第1宮】
+
+    你在自我形象上...，你總是...，你會...。
+
+    【第2宮】
+
+    你在金錢和價值觀上...，你習慣...，你總是...。
+
+    （依此類推，共12個宮位）
+    """
+    
     # --- E. 呼叫 DeepSeek AI ---
     # 最終檢查：確保 five_elements 存在且格式正確（中文）
     if 'chinese' not in chart:
@@ -263,6 +326,24 @@ def analyze_chart(req: ChartRequest):
             max_tokens=2000
         )
         deep_analysis = deep_res.choices[0].message.content
+        
+        # 3. 生成宮位分析（每一宮約100字，共12宮）
+        houses_analysis = None
+        if chart.get('western', {}).get('houses') and len(chart['western']['houses']) > 0:
+            try:
+                houses_res = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {"role": "system", "content": houses_analysis_prompt}, 
+                        {"role": "user", "content": summary}
+                    ],
+                    temperature=1.2,
+                    max_tokens=2000
+                )
+                houses_analysis = houses_res.choices[0].message.content
+            except Exception as e:
+                print(f"[DEBUG] 宮位分析生成失敗: {e}")
+                houses_analysis = None
         
         # 返回前最後一次驗證數據結構 - 確保五行能量數據正確（強制中文格式）
         if 'chinese' not in chart:
@@ -316,6 +397,7 @@ def analyze_chart(req: ChartRequest):
             "chart": chart, 
             "attachment_analysis": attachment_analysis,  # 依戀模式分析（300字）
             "deep_analysis": deep_analysis,  # 星盤深度探索（1000字）
+            "houses_analysis": houses_analysis,  # 宮位分析（每一宮約100字，共12宮）
             "ai_report": deep_analysis  # 向後兼容：使用 deep_analysis 的內容
         }
         print(f"[DEBUG] 最終返回的 chart.chinese.five_elements: {final_response['chart'].get('chinese', {}).get('five_elements', 'NOT FOUND')}")
@@ -328,7 +410,8 @@ def analyze_chart(req: ChartRequest):
         return {
             "chart": chart, 
             "attachment_analysis": None, 
-            "deep_analysis": None, 
+            "deep_analysis": None,
+            "houses_analysis": None,
             "error": str(e),
             "traceback": traceback.format_exc()
         }
