@@ -80,7 +80,7 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
             distribution.append({"sign": s, "percent": round(pct, 1)})
         distribution.sort(key=lambda x: x['percent'], reverse=True)
 
-    # --- 八字修復 ---
+    # --- 八字計算 (Fail-Safe Logic) ---
     solar = Solar.fromYmdHms(year, month, day, hour, minute, 0)
     lunar = solar.getLunar()
     bazi = lunar.getBaZi() # ['甲', '子', '乙', '丑'...] (共8字)
@@ -91,28 +91,79 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
         lunar.getDayInGanZhi(), lunar.getTimeInGanZhi()
     ]
     
-    # 五行統計 (修復 0% 問題)
+    # 五行統計 (Fail-Safe: 處理簡體和繁體中文)
     wuxing_cnt = {"Metal": 0, "Wood": 0, "Water": 0, "Fire": 0, "Earth": 0}
-    # 這裡必須包含所有可能的繁體字
-    wx_map = {
-        "金": "Metal", "木": "Wood", "水": "Water", "火": "Fire", "土": "Earth"
+    
+    # Robust mapping: 處理簡體和繁體中文，以及可能的變體
+    wuxing_translation = {
+        # 繁體中文（標準）
+        "金": "Metal",
+        "木": "Wood",
+        "水": "Water",
+        "火": "Fire",
+        "土": "Earth",
+        # 簡體中文變體（如果有的話）
+        "钅": "Metal",  # 簡體金的偏旁
+        "氵": "Water",  # 簡體水的偏旁
+        "灬": "Fire",   # 簡體火的偏旁
     }
     
-    # 使用 lunar 自帶的五行轉換
+    # 方法1: 使用 getBaZiWuXing() - 獲取八字五行列表
     limit = 6 if is_time_unknown else 8
-    # getBaZiWuXing() 回傳的是 ['木', '水'...]
-    bazi_wx_list = lunar.getBaZiWuXing() 
+    bazi_wx_list = lunar.getBaZiWuXing()
     
+    # 統計五行（從八字五行列表）
     for i in range(limit):
         if i < len(bazi_wx_list):
-            char_wx = bazi_wx_list[i] # 這是中文 '金'
-            en_key = wx_map.get(char_wx)
-            if en_key: wuxing_cnt[en_key] += 1
+            char_wx = bazi_wx_list[i]  # 可能是 '金', '木', '水', '火', '土' 或變體
+            en_key = wuxing_translation.get(char_wx)
+            if en_key:
+                wuxing_cnt[en_key] += 1
+            else:
+                # Debug: 如果找不到映射，打印出來
+                print(f"[DEBUG] 未找到五行映射: '{char_wx}' (Unicode: U+{ord(char_wx):04X})")
+    
+    # 方法2: 備用方法 - 直接從八字字符獲取五行（如果方法1失敗）
+    if sum(wuxing_cnt.values()) == 0:
+        print("[DEBUG] 方法1失敗，嘗試備用方法：從八字字符直接獲取五行")
+        # 使用 bazi_engine 的邏輯：從天干地支獲取五行
+        try:
+            ba_zi = lunar.getEightChar()
+            chars = [
+                ba_zi.getYearGan(), ba_zi.getYearZhi(),
+                ba_zi.getMonthGan(), ba_zi.getMonthZhi(),
+                ba_zi.getDayGan(), ba_zi.getDayZhi(),
+                ba_zi.getTimeGan(), ba_zi.getTimeZhi()
+            ]
+            
+            for char in chars[:limit]:
+                try:
+                    wx = char.getWuXing()  # 獲取五行屬性（返回中文）
+                    en_key = wuxing_translation.get(wx)
+                    if en_key:
+                        wuxing_cnt[en_key] += 1
+                    else:
+                        print(f"[DEBUG] 備用方法：未找到五行映射: '{wx}'")
+                except Exception as e:
+                    print(f"[DEBUG] 備用方法錯誤: {e}")
+        except Exception as e:
+            print(f"[DEBUG] 備用方法執行失敗: {e}")
+    
+    # 最終檢查：如果還是0，至少設置一個默認值
+    if sum(wuxing_cnt.values()) == 0:
+        print("[DEBUG] 警告：所有五行統計為0，使用默認值")
+        # 不設置默認值，讓 bazi_engine 來處理
 
     # 日主 (日干)
-    day_gan = bazi_text[2][0] # 取日柱第一個字
-    gan_map = {"甲":"Wood", "乙":"Wood", "丙":"Fire", "丁":"Fire", "戊":"Earth", "己":"Earth", "庚":"Metal", "辛":"Metal", "壬":"Water", "癸":"Water"}
-    self_elem = gan_map.get(day_gan, "未知")
+    day_gan = bazi_text[2][0] if len(bazi_text) > 2 and len(bazi_text[2]) > 0 else None
+    gan_map = {
+        "甲": "Wood", "乙": "Wood",
+        "丙": "Fire", "丁": "Fire",
+        "戊": "Earth", "己": "Earth",
+        "庚": "Metal", "辛": "Metal",
+        "壬": "Water", "癸": "Water"
+    }
+    self_elem = gan_map.get(day_gan, "未知") if day_gan else "未知"
 
     return {
         "western": {"planets": western_results, "elements": western_elements, "rising": rising_sign, "distribution": distribution, "houses": houses_data},
