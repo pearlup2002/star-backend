@@ -69,8 +69,21 @@ def analyze_chart(req: ChartRequest):
     # 立即清理 engine 返回的英文格式數據，改用中文格式
     # engine 返回的是 {"Metal": 0, "Wood": 0, ...}，我們需要 {"金": 0, "木": 0, ...}
     default_five_elements = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
-    # 強制覆蓋，不管 engine 返回什麼格式
-    chart['chinese']['five_elements'] = default_five_elements.copy()  # 使用 copy() 避免引用問題
+    
+    # 強制檢查並清理英文格式
+    if 'five_elements' in chart.get('chinese', {}):
+        fe = chart['chinese']['five_elements']
+        # 檢查是否是英文格式
+        if isinstance(fe, dict) and any(k in fe for k in ['Metal', 'Wood', 'Water', 'Fire', 'Earth']):
+            print(f"[DEBUG] 檢測到 engine 返回的英文格式，強制清理: {fe}")
+            chart['chinese']['five_elements'] = default_five_elements.copy()
+        else:
+            # 即使不是英文格式，也強制設置為中文格式（確保格式一致）
+            chart['chinese']['five_elements'] = default_five_elements.copy()
+    else:
+        # 不存在，直接設置
+        chart['chinese']['five_elements'] = default_five_elements.copy()
+    
     bazi_text = "八字計算失敗"
     
     print(f"[DEBUG] 設置默認值後的 chart['chinese']['five_elements']: {chart['chinese']['five_elements']}")  # 調試日誌
@@ -251,11 +264,38 @@ def analyze_chart(req: ChartRequest):
         )
         deep_analysis = deep_res.choices[0].message.content
         
-        # 返回前最後一次驗證數據結構 - 確保五行能量數據正確
+        # 返回前最後一次驗證數據結構 - 確保五行能量數據正確（強制中文格式）
         if 'chinese' not in chart:
             chart['chinese'] = {}
-        if 'five_elements' not in chart['chinese'] or not isinstance(chart['chinese']['five_elements'], dict):
-            chart['chinese']['five_elements'] = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+        
+        # 強制檢查並轉換為中文格式
+        fe = chart['chinese'].get('five_elements', {})
+        
+        # 檢查是否是英文格式（Metal, Wood, Water, Fire, Earth）
+        is_english_format = False
+        if isinstance(fe, dict):
+            english_keys = ['Metal', 'Wood', 'Water', 'Fire', 'Earth']
+            if any(key in fe for key in english_keys):
+                is_english_format = True
+                print(f"[DEBUG] 檢測到英文格式的 five_elements: {fe}")
+        
+        # 如果是英文格式或不存在，重新設置為中文格式
+        if is_english_format or not isinstance(fe, dict) or 'five_elements' not in chart['chinese']:
+            # 如果 bazi_engine 已經計算過，應該已經設置了中文格式
+            # 但為了安全，我們再次確保是中文格式
+            if not is_english_format and isinstance(fe, dict) and any(k in fe for k in ["金", "木", "水", "火", "土"]):
+                # 已經是中文格式，只需要確保所有鍵都存在
+                required_keys = ["金", "木", "水", "火", "土"]
+                for key in required_keys:
+                    if key not in chart['chinese']['five_elements']:
+                        chart['chinese']['five_elements'][key] = 0
+                    # 確保值是數字
+                    if not isinstance(chart['chinese']['five_elements'][key], (int, float)):
+                        chart['chinese']['five_elements'][key] = 0
+            else:
+                # 強制設置為中文格式默認值
+                chart['chinese']['five_elements'] = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+                print(f"[DEBUG] 強制設置為中文格式默認值")
         else:
             # 確保所有中文鍵都存在且為數字
             required_keys = ["金", "木", "水", "火", "土"]
@@ -265,6 +305,10 @@ def analyze_chart(req: ChartRequest):
                 # 確保值是數字
                 if not isinstance(chart['chinese']['five_elements'][key], (int, float)):
                     chart['chinese']['five_elements'][key] = 0
+        
+        print(f"[DEBUG] 最終驗證後的 five_elements: {chart['chinese'].get('five_elements')}")
+        print(f"[DEBUG] five_elements 類型: {type(chart['chinese'].get('five_elements'))}")
+        print(f"[DEBUG] five_elements 鍵: {list(chart['chinese'].get('five_elements', {}).keys())}")
         
         # 返回前最後一次驗證數據結構
         # 為了向後兼容，同時返回 ai_report（使用 deep_analysis 的內容）
