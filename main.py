@@ -41,22 +41,25 @@ def analyze_chart(req: ChartRequest):
     # --- A. 計算西方星盤 ---
     chart = engine.calculate_positions(req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown)
     
-    # --- B. 計算東方八字 (修復 0% 問題) ---
+    # --- B. 計算東方八字 (使用 bazi_engine 的準確計算) ---
     # 確保 chinese 結構存在
     if 'chinese' not in chart:
         chart['chinese'] = {}
     
-    # 設置默認值（以防計算失敗）
+    # 清理 engine 返回的英文格式數據，改用中文格式
+    # engine 返回的是 {"Metal": 0, "Wood": 0, ...}，我們需要 {"金": 0, "木": 0, ...}
     default_five_elements = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
     chart['chinese']['five_elements'] = default_five_elements
     bazi_text = "八字計算失敗"
     
     try:
         bazi_data = bazi_engine.get_bazi_analysis(req.year, req.month, req.day, req.hour, req.minute)
+        print(f"[DEBUG] bazi_data: {bazi_data}")  # 調試日誌
         
-        # 注入數據供前端使用
+        # 注入數據供前端使用 - 使用 bazi_engine 的準確計算結果
         if bazi_data and 'percentages' in bazi_data:
             chart['chinese']['five_elements'] = bazi_data['percentages']
+            print(f"[DEBUG] 設置 five_elements: {chart['chinese']['five_elements']}")  # 調試日誌
         
         # 獲取文字供 AI 使用
         if bazi_data and 'bazi_text' in bazi_data:
@@ -66,6 +69,11 @@ def analyze_chart(req: ChartRequest):
         error_msg = f"八字計算錯誤: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         # 保持默認值，確保前端能收到數據結構
+    
+    # 確保 five_elements 存在且格式正確
+    if 'five_elements' not in chart['chinese']:
+        chart['chinese']['five_elements'] = default_five_elements
+    print(f"[DEBUG] 最終 chart['chinese']['five_elements']: {chart['chinese'].get('five_elements')}")  # 調試日誌
 
     # --- C. 準備 AI 閱讀的資料 ---
     w = chart['western']['planets']
@@ -105,6 +113,14 @@ def analyze_chart(req: ChartRequest):
     """
     
     # --- E. 呼叫 DeepSeek AI ---
+    # 最終檢查：確保 five_elements 存在
+    if 'chinese' not in chart:
+        chart['chinese'] = {}
+    if 'five_elements' not in chart['chinese'] or not chart['chinese']['five_elements']:
+        chart['chinese']['five_elements'] = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+    
+    print(f"[DEBUG] 返回前的 chart['chinese']: {chart.get('chinese')}")  # 調試日誌
+    
     try:
         res = client.chat.completions.create(
             model="deepseek-chat",
