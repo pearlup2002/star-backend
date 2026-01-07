@@ -1,20 +1,20 @@
+# Star Mirror Backend - v2.0 (Fixed Order & New AI Persona)
 from fastapi import FastAPI
 from pydantic import BaseModel
 import os
 import engine
 import bazi_engine
 from openai import OpenAI
-import json
 
 # ==========================================
-# 關鍵修正：必須先初始化 app，才能使用 @app
+# 1. 初始化 App (必須放在最前面！)
 # ==========================================
 app = FastAPI()
 
-# 初始化 OpenAI Client
+# 2. 初始化 OpenAI Client
 client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 
-# 定義資料模型
+# 3. 定義資料模型
 class ChartRequest(BaseModel):
     year: int
     month: int
@@ -26,24 +26,29 @@ class ChartRequest(BaseModel):
     is_time_unknown: bool = False
 
 # ==========================================
-# 路由定義 (現在 app 已經存在，這裡就不會報錯了)
+# 4. 定義 API 路由
 # ==========================================
 @app.post("/analyze")
 def analyze_chart(req: ChartRequest):
-    # 1. 計算星盤與八字
+    # --- A. 計算西方星盤 ---
     chart = engine.calculate_positions(req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown)
     
+    # --- B. 計算東方八字 (修復 0% 問題) ---
     try:
         bazi_data = bazi_engine.get_bazi_analysis(req.year, req.month, req.day, req.hour, req.minute)
+        
+        # 注入數據供前端使用
         if 'chinese' not in chart:
             chart['chinese'] = {}
         chart['chinese']['five_elements'] = bazi_data['percentages']
+        
+        # 獲取文字供 AI 使用
         bazi_text = bazi_data['bazi_text']
     except Exception as e:
         print(f"八字計算錯誤: {e}")
         bazi_text = "八字計算失敗"
 
-    # 2. 準備使用者資料 Summary
+    # --- C. 準備 AI 閱讀的資料 ---
     w = chart['western']['planets']
     summary = (
         f"用戶星盤資料：\n"
@@ -53,7 +58,7 @@ def analyze_chart(req: ChartRequest):
         f"五行能量：{chart['chinese'].get('five_elements', 'N/A')}。"
     )
 
-    # 3. 定義 AI 人格與指令 (Markdown 模式)
+    # --- D. 定義 AI 人格 (心理學冷讀風格) ---
     sys_prompt = """
     你是一款名為《Star Mirror》的專業星盤分析引擎。你的風格是：**一針見血、深刻、甚至帶有心理學的冷讀色彩**。
 
@@ -80,7 +85,7 @@ def analyze_chart(req: ChartRequest):
     請以 Markdown 格式輸出，不要有 JSON 結構，直接進入文章標題與內容。
     """
     
-    # 4. 呼叫 AI (純文字模式)
+    # --- E. 呼叫 DeepSeek AI ---
     try:
         res = client.chat.completions.create(
             model="deepseek-chat",
