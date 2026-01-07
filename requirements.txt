@@ -1,10 +1,9 @@
 fastapi
 uvicorn
-flatlib
-pyswisseph
-pytz
-numpy<2.0
-gunicorn
-openai
 pydantic
+openai
+skyfield
+flatlib
 lunar_python
+numpy
+requests
