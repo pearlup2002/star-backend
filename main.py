@@ -36,21 +36,44 @@ class ChartRequest(BaseModel):
 # ==========================================
 # 4. 定義 API 路由
 # ==========================================
+@app.get("/test-bazi")
+def test_bazi(year: int = 2000, month: int = 1, day: int = 1, hour: int = 12, minute: int = 0):
+    """測試端點：直接返回八字計算結果"""
+    try:
+        bazi_data = bazi_engine.get_bazi_analysis(year, month, day, hour, minute)
+        return {
+            "success": True,
+            "bazi_data": bazi_data,
+            "five_elements": bazi_data.get('percentages', {})
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @app.post("/analyze")
 def analyze_chart(req: ChartRequest):
     # --- A. 計算西方星盤 ---
     chart = engine.calculate_positions(req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown)
+    
+    print(f"[DEBUG] engine 返回的 chart['chinese']: {chart.get('chinese')}")  # 調試日誌
     
     # --- B. 計算東方八字 (使用 bazi_engine 的準確計算) ---
     # 確保 chinese 結構存在
     if 'chinese' not in chart:
         chart['chinese'] = {}
     
-    # 清理 engine 返回的英文格式數據，改用中文格式
+    # 立即清理 engine 返回的英文格式數據，改用中文格式
     # engine 返回的是 {"Metal": 0, "Wood": 0, ...}，我們需要 {"金": 0, "木": 0, ...}
     default_five_elements = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
-    chart['chinese']['five_elements'] = default_five_elements
+    # 強制覆蓋，不管 engine 返回什麼格式
+    chart['chinese']['five_elements'] = default_five_elements.copy()  # 使用 copy() 避免引用問題
     bazi_text = "八字計算失敗"
+    
+    print(f"[DEBUG] 設置默認值後的 chart['chinese']['five_elements']: {chart['chinese']['five_elements']}")  # 調試日誌
     
     try:
         bazi_data = bazi_engine.get_bazi_analysis(req.year, req.month, req.day, req.hour, req.minute)
@@ -113,13 +136,29 @@ def analyze_chart(req: ChartRequest):
     """
     
     # --- E. 呼叫 DeepSeek AI ---
-    # 最終檢查：確保 five_elements 存在
+    # 最終檢查：確保 five_elements 存在且格式正確（中文）
     if 'chinese' not in chart:
         chart['chinese'] = {}
-    if 'five_elements' not in chart['chinese'] or not chart['chinese']['five_elements']:
-        chart['chinese']['five_elements'] = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
     
+    # 強制確保 five_elements 是中文格式
+    if 'five_elements' not in chart['chinese']:
+        chart['chinese']['five_elements'] = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+    else:
+        # 如果存在但格式不對（可能是英文格式），轉換或重新設置
+        fe = chart['chinese']['five_elements']
+        # 檢查是否是英文格式
+        if 'Metal' in fe or 'Wood' in fe or 'Water' in fe or 'Fire' in fe or 'Earth' in fe:
+            # 是英文格式，重新設置為中文格式
+            chart['chinese']['five_elements'] = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+        # 確保所有中文鍵都存在
+        required_keys = ["金", "木", "水", "火", "土"]
+        for key in required_keys:
+            if key not in chart['chinese']['five_elements']:
+                chart['chinese']['five_elements'][key] = 0
+    
+    print(f"[DEBUG] 返回前的完整 chart 結構: {chart}")  # 調試日誌
     print(f"[DEBUG] 返回前的 chart['chinese']: {chart.get('chinese')}")  # 調試日誌
+    print(f"[DEBUG] 返回前的 chart['chinese']['five_elements']: {chart['chinese'].get('five_elements')}")  # 調試日誌
     
     try:
         res = client.chat.completions.create(
@@ -130,6 +169,11 @@ def analyze_chart(req: ChartRequest):
             ],
             temperature=1.3 
         )
-        return {"chart": chart, "ai_report": res.choices[0].message.content}
+        # 返回前最後一次驗證數據結構
+        final_response = {"chart": chart, "ai_report": res.choices[0].message.content}
+        print(f"[DEBUG] 最終返回的 chart.chinese.five_elements: {final_response['chart'].get('chinese', {}).get('five_elements', 'NOT FOUND')}")
+        return final_response
     except Exception as e:
+        # 即使 AI 調用失敗，也要確保返回正確的 chart 數據
+        print(f"[DEBUG] AI 調用失敗，但返回 chart: {chart.get('chinese', {}).get('five_elements', 'NOT FOUND')}")
         return {"chart": chart, "ai_report": None, "error": str(e)}
