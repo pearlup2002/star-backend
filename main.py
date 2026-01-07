@@ -1,8 +1,36 @@
-# ... 上面的 import 不用動 ...
+from fastapi import FastAPI
+from pydantic import BaseModel
+import os
+import engine
+import bazi_engine
+from openai import OpenAI
+import json
 
+# ==========================================
+# 關鍵修正：必須先初始化 app，才能使用 @app
+# ==========================================
+app = FastAPI()
+
+# 初始化 OpenAI Client
+client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
+
+# 定義資料模型
+class ChartRequest(BaseModel):
+    year: int
+    month: int
+    day: int
+    hour: int = 12
+    minute: int = 0
+    lat: float = 22.3
+    lon: float = 114.2
+    is_time_unknown: bool = False
+
+# ==========================================
+# 路由定義 (現在 app 已經存在，這裡就不會報錯了)
+# ==========================================
 @app.post("/analyze")
 def analyze_chart(req: ChartRequest):
-    # 1. 計算星盤與八字 (這部分保持不變)
+    # 1. 計算星盤與八字
     chart = engine.calculate_positions(req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown)
     
     try:
@@ -25,8 +53,7 @@ def analyze_chart(req: ChartRequest):
         f"五行能量：{chart['chinese'].get('five_elements', 'N/A')}。"
     )
 
-    # 3. 【這裡放入你的新 Prompt】
-    # 注意：我把你的變數名稱 NEW_SYSTEM_PROMPT 改為 sys_prompt 以配合程式邏輯
+    # 3. 定義 AI 人格與指令 (Markdown 模式)
     sys_prompt = """
     你是一款名為《Star Mirror》的專業星盤分析引擎。你的風格是：**一針見血、深刻、甚至帶有心理學的冷讀色彩**。
 
@@ -53,7 +80,7 @@ def analyze_chart(req: ChartRequest):
     請以 Markdown 格式輸出，不要有 JSON 結構，直接進入文章標題與內容。
     """
     
-    # 4. 呼叫 AI (注意：這裡移除了 JSON 模式，改為純文字，配合你的 Prompt 要求)
+    # 4. 呼叫 AI (純文字模式)
     try:
         res = client.chat.completions.create(
             model="deepseek-chat",
@@ -61,8 +88,7 @@ def analyze_chart(req: ChartRequest):
                 {"role": "system", "content": sys_prompt}, 
                 {"role": "user", "content": summary}
             ],
-            temperature=1.3 # 保持高創造力
-            # 注意：這裡刪除了 response_format={"type": "json_object"}，因為你要的是 Markdown
+            temperature=1.3 
         )
         return {"chart": chart, "ai_report": res.choices[0].message.content}
     except Exception as e:
