@@ -2,6 +2,14 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import os
+import sys
+from pathlib import Path
+
+# 確保當前目錄在 Python 路徑中
+current_dir = Path(__file__).parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
 import engine
 import bazi_engine
 from openai import OpenAI
