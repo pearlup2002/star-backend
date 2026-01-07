@@ -80,7 +80,7 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
             distribution.append({"sign": s, "percent": round(pct, 1)})
         distribution.sort(key=lambda x: x['percent'], reverse=True)
 
-    # --- 八字計算 (Fail-Safe Logic) ---
+    # --- 八字計算 ---
     solar = Solar.fromYmdHms(year, month, day, hour, minute, 0)
     lunar = solar.getLunar()
     bazi = lunar.getBaZi() # ['甲', '子', '乙', '丑'...] (共8字)
@@ -91,8 +91,8 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
         lunar.getDayInGanZhi(), lunar.getTimeInGanZhi()
     ]
     
-    # 五行統計 (Fail-Safe: 處理簡體和繁體中文)
-    wuxing_cnt = {"Metal": 0, "Wood": 0, "Water": 0, "Fire": 0, "Earth": 0}
+    # 1. Calculation Logic: Initialize wuxing_count
+    wuxing_count = {"Metal": 0, "Wood": 0, "Water": 0, "Fire": 0, "Earth": 0}
     
     # Robust mapping: 處理簡體和繁體中文，以及可能的變體
     wuxing_translation = {
@@ -108,51 +108,27 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
         "灬": "Fire",   # 簡體火的偏旁
     }
     
-    # 方法1: 使用 getBaZiWuXing() - 獲取八字五行列表
-    limit = 6 if is_time_unknown else 8
-    bazi_wx_list = lunar.getBaZiWuXing()
+    # 2. Get the list bazi_wuxing
+    bazi_wuxing = lunar.getBaZiWuXing()
     
-    # 統計五行（從八字五行列表）
+    # Debug Print: Add print so we can see it in Render logs
+    print(f"DEBUG RAW BAZI: {bazi_wuxing}")
+    
+    # 3. Iterate through the list (limit to 6 items if is_time_unknown is True, else 8)
+    limit = 6 if is_time_unknown else 8
+    
     for i in range(limit):
-        if i < len(bazi_wx_list):
-            char_wx = bazi_wx_list[i]  # 可能是 '金', '木', '水', '火', '土' 或變體
+        if i < len(bazi_wuxing):
+            char_wx = bazi_wuxing[i]  # 可能是 '金', '木', '水', '火', '土' 或變體
+            # Lookup the character in wuxing_translation. If found, increment the count.
             en_key = wuxing_translation.get(char_wx)
             if en_key:
-                wuxing_cnt[en_key] += 1
+                wuxing_count[en_key] += 1
             else:
                 # Debug: 如果找不到映射，打印出來
                 print(f"[DEBUG] 未找到五行映射: '{char_wx}' (Unicode: U+{ord(char_wx):04X})")
     
-    # 方法2: 備用方法 - 直接從八字字符獲取五行（如果方法1失敗）
-    if sum(wuxing_cnt.values()) == 0:
-        print("[DEBUG] 方法1失敗，嘗試備用方法：從八字字符直接獲取五行")
-        # 使用 bazi_engine 的邏輯：從天干地支獲取五行
-        try:
-            ba_zi = lunar.getEightChar()
-            chars = [
-                ba_zi.getYearGan(), ba_zi.getYearZhi(),
-                ba_zi.getMonthGan(), ba_zi.getMonthZhi(),
-                ba_zi.getDayGan(), ba_zi.getDayZhi(),
-                ba_zi.getTimeGan(), ba_zi.getTimeZhi()
-            ]
-            
-            for char in chars[:limit]:
-                try:
-                    wx = char.getWuXing()  # 獲取五行屬性（返回中文）
-                    en_key = wuxing_translation.get(wx)
-                    if en_key:
-                        wuxing_cnt[en_key] += 1
-                    else:
-                        print(f"[DEBUG] 備用方法：未找到五行映射: '{wx}'")
-                except Exception as e:
-                    print(f"[DEBUG] 備用方法錯誤: {e}")
-        except Exception as e:
-            print(f"[DEBUG] 備用方法執行失敗: {e}")
-    
-    # 最終檢查：如果還是0，至少設置一個默認值
-    if sum(wuxing_cnt.values()) == 0:
-        print("[DEBUG] 警告：所有五行統計為0，使用默認值")
-        # 不設置默認值，讓 bazi_engine 來處理
+    print(f"[DEBUG] 五行統計結果: {wuxing_count}")
 
     # 日主 (日干)
     day_gan = bazi_text[2][0] if len(bazi_text) > 2 and len(bazi_text[2]) > 0 else None
@@ -165,7 +141,8 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
     }
     self_elem = gan_map.get(day_gan, "未知") if day_gan else "未知"
 
+    # 4. Output: Ensure the returned JSON structure for five_elements uses the English Keys
     return {
         "western": {"planets": western_results, "elements": western_elements, "rising": rising_sign, "distribution": distribution, "houses": houses_data},
-        "chinese": {"bazi_text": bazi_text, "self_element": self_elem, "five_elements": wuxing_cnt}
+        "chinese": {"bazi_text": bazi_text, "self_element": self_elem, "five_elements": wuxing_count}
     }
