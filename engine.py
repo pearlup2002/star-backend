@@ -104,38 +104,63 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
     # 第三軌：中式八字計算 (使用修正後的變數)
     # ==========================================
     try:
-        # 【關鍵】這裡使用 bazi_year, bazi_hour... (真太陽時)
+        # 使用修正後的時間
         solar = Solar.fromYmdHms(bazi_year, bazi_month, bazi_day, bazi_hour, bazi_minute, 0)
         lunar = solar.getLunar()
         
+        # 獲取八字文字 (e.g. ['甲子', '乙丑'...])
         bazi_text = [
             lunar.getYearInGanZhi(), lunar.getMonthInGanZhi(),
             lunar.getDayInGanZhi(), lunar.getTimeInGanZhi()
         ]
         
-        wuxing_translation = {
-            "金": "Metal", "钅": "Metal", "木": "Wood", "水": "Water", "氵": "Water",
-            "火": "Fire", "灬": "Fire", "土": "Earth"
-        }
-        wuxing_count = {"Metal": 0, "Wood": 0, "Water": 0, "Fire": 0, "Earth": 0}
-        bazi_wuxing = lunar.getBaZiWuXing()
+        # 獲取八字五行列表 (e.g. ['木', '水', '木', '土'...])
+        # getBaZiWuXing() 回傳的是簡體或繁體中文
+        bazi_wuxing_list = lunar.getBaZiWuXing()
         
+        # 初始化計數器 (英文 Key)
+        wuxing_count = {"Metal": 0, "Wood": 0, "Water": 0, "Fire": 0, "Earth": 0}
+        
+        # 決定要算幾個字 (未知時間算前6個字，已知時間算8個字)
         limit = 6 if is_time_unknown else 8
+        
+        # 【暴力判斷法】 直接檢查字元，不查字典了
         for i in range(limit):
-            if i < len(bazi_wuxing):
-                char = bazi_wuxing[i]
-                en_key = wuxing_translation.get(char)
-                if en_key: wuxing_count[en_key] += 1
-            
+            if i < len(bazi_wuxing_list):
+                char = str(bazi_wuxing_list[i]) # 確保是字串
+                
+                # 金 (包含繁簡體部首)
+                if '金' in char or '钅' in char: 
+                    wuxing_count['Metal'] += 1
+                # 木
+                elif '木' in char:
+                    wuxing_count['Wood'] += 1
+                # 水 (包含三點水)
+                elif '水' in char or '氵' in char:
+                    wuxing_count['Water'] += 1
+                # 火 (包含四點火)
+                elif '火' in char or '灬' in char:
+                    wuxing_count['Fire'] += 1
+                # 土
+                elif '土' in char:
+                    wuxing_count['Earth'] += 1
+        
+        # 日主計算
         day_master_gan = bazi_text[2][0] if len(bazi_text[2]) > 0 else "甲"
-        gan_wuxing = {"甲": "Wood", "乙": "Wood", "丙": "Fire", "丁": "Fire", "戊": "Earth", "己": "Earth", "庚": "Metal", "辛": "Metal", "壬": "Water", "癸": "Water"}
-        self_element = gan_wuxing.get(day_master_gan, "未知")
+        # 簡易日主五行 (Hardcode)
+        if day_master_gan in ['甲', '乙']: self_element = "Wood"
+        elif day_master_gan in ['丙', '丁']: self_element = "Fire"
+        elif day_master_gan in ['戊', '己']: self_element = "Earth"
+        elif day_master_gan in ['庚', '辛']: self_element = "Metal"
+        elif day_master_gan in ['壬', '癸']: self_element = "Water"
+        else: self_element = "Unknown"
         
     except Exception as e:
         print(f"BaZi Error: {e}")
+        # 發生錯誤時回傳空數據，避免 APP 崩潰
         bazi_text = ["", "", "", ""]
         self_element = "未知"
-        wuxing_count = {}
+        wuxing_count = {"Metal": 0, "Wood": 0, "Water": 0, "Fire": 0, "Earth": 0}
 
     return {
         "western": {
@@ -148,6 +173,6 @@ def calculate_positions(year, month, day, hour=12, minute=0, lat=22.3, lon=114.2
         "chinese": {
             "bazi_text": bazi_text,
             "self_element": self_element,
-            "five_elements": wuxing_count
+            "five_elements": wuxing_count  # 這裡是關鍵，一定要傳回這個字典
         }
     }
