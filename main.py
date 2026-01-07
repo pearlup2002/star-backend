@@ -108,41 +108,68 @@ def analyze_chart(req: ChartRequest):
         f"五行能量：{chart['chinese'].get('five_elements', 'N/A')}。"
     )
 
-    # --- D. 定義 AI 人格 (心理學冷讀風格) ---
-    sys_prompt = """
-    你是一款名為《Star Mirror》的專業星盤分析引擎。你的風格是：**一針見血、深刻、甚至帶有心理學的冷讀色彩**。
+    # --- D. 定義 AI 提示詞 ---
+    # 1. 依戀模式分析提示詞（300字，心理學角度）
+    attachment_prompt = """
+    你是專業的心理學分析師，根據星盤數據分析用戶的依戀模式。
 
-    【分析規則 - 絕對嚴格執行】
-    1. **禁止建議**：絕對不要寫「建議你...」、「你可以試著...」。用戶不需要心靈雞湯，他們需要被看穿。
-    2. **禁止名詞解釋**：不要解釋「什麼是二宮」、「什麼是金星」。直接說結論。
-    3. **宮位分析規則（極重要）**：
-       - **絕對禁止**：不要說「第二宮代表金錢和價值觀」、「第五宮代表創意和戀愛」這類解釋。
-       - **必須直接描述**：直接說「你在金錢上...」、「你在戀愛中...」、「你在工作中...」。
-       - **實際模樣**：描述用戶在該宮位的實際表現、行為模式、真實狀態。
-       - 範例：
-         (X) 錯誤：「你的第二宮在金牛座，第二宮代表金錢，金牛座重視物質...」
-         (O) 正確：「你對金錢的態度是：你習慣...，你會...，你總是...」
-    
-    4. **四大維度**：請務必從以下四個角度進行分析，每個角度一段：
-       - **內在靈魂 (The Soul)**：潛意識、安全感來源、恐懼。
-       - **處事風格 (Execution)**：工作邏輯、決策模式、行動力。
-       - **愛情與慾望 (Love & Desire)**：依戀模式、性吸引力、情感盲點。
-       - **人際博弈 (Social Strategy)**：社交手段、防禦機制、給人的印象。
+    【任務】
+    根據用戶的星盤（特別是月亮、土星、金星的位置和相位），分析其依戀類型傾向。
 
-    5. **依戀類型判定**：
-       根據星盤（尤其是月亮與土星相位），將用戶歸類為以下四者之一，並用粗體標示：
+    【要求】
+    1. 字數：約 300 字
+    2. 風格：語言淺白，一針見血，不要廢話
+    3. 禁止建議：不要寫「建議你...」、「你可以試著...」
+    4. 禁止解釋：不要解釋「什麼是依戀類型」，直接分析
+    5. 必須判定：將用戶歸類為以下四者之一，並用粗體標示：
        - **安全型依戀 (Secure)**
        - **焦慮型依戀 (Anxious)**
        - **逃避型依戀 (Avoidant)**
        - **恐懼-逃避型依戀 (Fearful-Avoidant)**
+    
+    6. 分析角度：從心理學角度分析其在親密關係中的表現、情感模式、防禦機制
 
-    【語氣範例】
-    (O) 正確：「你外表看似隨和，其實內心極度計較公平。這是因為你的月亮天秤在...」
-    (X) 錯誤：「月亮代表內心，落在天秤座的人通常...」
-    (X) 錯誤：「你的第七宮在天蠍座，第七宮代表伴侶關係...」
-    (O) 正確：「你在伴侶關係中：你總是...，你會...，你習慣...」
+    【輸出格式】
+    直接輸出分析內容，不要標題，不要 Markdown 格式，純文字即可。
+    """
+    
+    # 2. 星盤深度探索提示詞（1000字，多角度分析）
+    deep_analysis_prompt = """
+    你是現代星盤解說師，風格：語言淺白，一針見血，不要廢話，不需要建議。
 
-    請以 Markdown 格式輸出，不要有 JSON 結構，直接進入文章標題與內容。
+    【任務】
+    根據用戶星盤，進行 1000 字左右的深度分析。
+
+    【格式要求】
+    1. 使用 Markdown 格式
+    2. 每個小標題使用 ## 標記（會顯示為黃字）
+    3. 每個小標題必須獨立一行
+    4. 小標題後空一行再寫內容
+
+    【內容要求】
+    1. 禁止建議：絕對不要寫「建議你...」、「你可以試著...」
+    2. 禁止名詞解釋：不要解釋「什麼是二宮」、「什麼是金星」，直接說結論
+    3. 宮位分析規則（極重要）：
+       - 絕對禁止：不要說「第二宮代表金錢和價值觀」、「第五宮代表創意和戀愛」
+       - 必須直接描述：直接說「你在金錢上...」、「你在戀愛中...」、「你在工作中...」
+       - 實際模樣：描述用戶在該宮位的實際表現、行為模式、真實狀態
+    4. 多角度分析：
+       - 每個小標題從不同角度出發
+       - 可以是：內在靈魂、處事風格、愛情與慾望、人際博弈、金錢觀、工作模式、情感盲點、防禦機制、真實模樣等
+       - 每次分析的角度要不同，全面描繪這個人
+    5. 語言風格：淺白、直接、一針見血，像在描述一個真實的人
+
+    【範例格式】
+    ## 內在靈魂
+
+    你外表看似...，其實內心...。你的月亮...，這讓你在...時會...。
+
+    ## 處事風格
+
+    你在工作中...，你習慣...，你總是...。
+
+    【輸出】
+    直接輸出 Markdown 格式的分析內容，開頭不要有標題，直接從第一個小標題開始。
     """
     
     # --- E. 呼叫 DeepSeek AI ---
@@ -171,19 +198,46 @@ def analyze_chart(req: ChartRequest):
     print(f"[DEBUG] 返回前的 chart['chinese']['five_elements']: {chart['chinese'].get('five_elements')}")  # 調試日誌
     
     try:
-        res = client.chat.completions.create(
+        # 1. 生成依戀模式分析（300字，心理學角度）
+        attachment_res = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": sys_prompt}, 
+                {"role": "system", "content": attachment_prompt}, 
                 {"role": "user", "content": summary}
             ],
-            temperature=1.3 
+            temperature=1.0,
+            max_tokens=500
         )
+        attachment_analysis = attachment_res.choices[0].message.content
+        
+        # 2. 生成星盤深度探索（1000字，多角度分析）
+        deep_res = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": deep_analysis_prompt}, 
+                {"role": "user", "content": summary}
+            ],
+            temperature=1.3,
+            max_tokens=2000
+        )
+        deep_analysis = deep_res.choices[0].message.content
+        
         # 返回前最後一次驗證數據結構
-        final_response = {"chart": chart, "ai_report": res.choices[0].message.content}
+        final_response = {
+            "chart": chart, 
+            "attachment_analysis": attachment_analysis,  # 依戀模式分析（300字）
+            "deep_analysis": deep_analysis  # 星盤深度探索（1000字）
+        }
         print(f"[DEBUG] 最終返回的 chart.chinese.five_elements: {final_response['chart'].get('chinese', {}).get('five_elements', 'NOT FOUND')}")
         return final_response
     except Exception as e:
         # 即使 AI 調用失敗，也要確保返回正確的 chart 數據
         print(f"[DEBUG] AI 調用失敗，但返回 chart: {chart.get('chinese', {}).get('five_elements', 'NOT FOUND')}")
-        return {"chart": chart, "ai_report": None, "error": str(e)}
+        import traceback
+        return {
+            "chart": chart, 
+            "attachment_analysis": None, 
+            "deep_analysis": None, 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
