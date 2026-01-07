@@ -42,19 +42,30 @@ def analyze_chart(req: ChartRequest):
     chart = engine.calculate_positions(req.year, req.month, req.day, req.hour, req.minute, req.lat, req.lon, req.is_time_unknown)
     
     # --- B. 計算東方八字 (修復 0% 問題) ---
+    # 確保 chinese 結構存在
+    if 'chinese' not in chart:
+        chart['chinese'] = {}
+    
+    # 設置默認值（以防計算失敗）
+    default_five_elements = {"金": 0, "木": 0, "水": 0, "火": 0, "土": 0}
+    chart['chinese']['five_elements'] = default_five_elements
+    bazi_text = "八字計算失敗"
+    
     try:
         bazi_data = bazi_engine.get_bazi_analysis(req.year, req.month, req.day, req.hour, req.minute)
         
         # 注入數據供前端使用
-        if 'chinese' not in chart:
-            chart['chinese'] = {}
-        chart['chinese']['five_elements'] = bazi_data['percentages']
+        if bazi_data and 'percentages' in bazi_data:
+            chart['chinese']['five_elements'] = bazi_data['percentages']
         
         # 獲取文字供 AI 使用
-        bazi_text = bazi_data['bazi_text']
+        if bazi_data and 'bazi_text' in bazi_data:
+            bazi_text = bazi_data['bazi_text']
     except Exception as e:
-        print(f"八字計算錯誤: {e}")
-        bazi_text = "八字計算失敗"
+        import traceback
+        error_msg = f"八字計算錯誤: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        # 保持默認值，確保前端能收到數據結構
 
     # --- C. 準備 AI 閱讀的資料 ---
     w = chart['western']['planets']
